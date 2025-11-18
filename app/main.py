@@ -123,4 +123,124 @@ class LoginView(tk.Frame):
             return
         self.destroy()
         DashboardView(self.master, self.db, user).pack(fill="both", expand=True)
+# app/views/dashboard.py
+import tkinter as tk
+from app.views.courses import CoursesView
+from app.views.enrollment import EnrollmentView
+from app.views.assignments import AssignmentsView
+from app.views.progress import ProgressView
+from app.views.grading import GradingView
+from app.views.announcements import AnnouncementsView
+
+class DashboardView(tk.Frame):
+    def __init__(self, master, db, user):
+        super().__init__(master)
+        self.db, self.user = db, user
+        tk.Label(self, text=f"Welcome {user.username} ({user.role})").pack()
+        if user.role in ("ADMIN", "TEACHER"):
+            tk.Button(self, text="Courses", command=self.open_courses).pack(fill="x")
+            tk.Button(self, text="Assignments", command=self.open_assignments).pack(fill="x")
+            tk.Button(self, text="Grading", command=self.open_grading).pack(fill="x")
+            tk.Button(self, text="Announcements", command=self.open_announcements).pack(fill="x")
+        if user.role == "STUDENT":
+            tk.Button(self, text="My Enrollments", command=self.open_enrollment).pack(fill="x")
+            tk.Button(self, text="Progress", command=self.open_progress).pack(fill="x")
+
+    def open_courses(self): CoursesView(self.master, self.db, self.user).pack()
+    def open_enrollment(self): EnrollmentView(self.master, self.db, self.user).pack()
+    def open_assignments(self): AssignmentsView(self.master, self.db, self.user).pack()
+    def open_progress(self): ProgressView(self.master, self.db, self.user).pack()
+    def open_grading(self): GradingView(self.master, self.db, self.user).pack()
+    def open_announcements(self): AnnouncementsView(self.master, self.db, self.user).pack()
+# app/views/courses.py
+import tkinter as tk
+from tkinter import messagebox
+from app.services.course_service import CourseService
+
+class CoursesView(tk.Frame):
+    def __init__(self, master, db, user):
+        super().__init__(master)
+        self.service = CourseService(db)
+        self.user = user
+        tk.Label(self, text="Title").grid(row=0, column=0)
+        tk.Label(self, text="Description").grid(row=1, column=0)
+        self.title = tk.Entry(self); self.title.grid(row=0, column=1)
+        self.desc = tk.Entry(self); self.desc.grid(row=1, column=1)
+        tk.Button(self, text="Create", command=self.create_course).grid(row=2, column=0)
+        tk.Button(self, text="Refresh", command=self.refresh).grid(row=2, column=1)
+        self.listbox = tk.Listbox(self, width=50); self.listbox.grid(row=3, column=0, columnspan=2)
+        tk.Button(self, text="Update", command=self.update_course).grid(row=4, column=0)
+        tk.Button(self, text="Delete", command=self.delete_course).grid(row=4, column=1)
+        self.refresh()
+
+    def refresh(self):
+        self.listbox.delete(0, tk.END)
+        for c in self.service.list_by_teacher(self.user.id):
+            self.listbox.insert(tk.END, f"{c.id}: {c.title}")
+
+    def selected_id(self):
+        sel = self.listbox.curselection()
+        if not sel: return None
+        return int(self.listbox.get(sel[0]).split(":")[0])
+
+    def create_course(self):
+        if not self.title.get():
+            messagebox.showerror("Error", "Title required"); return
+        self.service.create(self.title.get(), self.desc.get(), self.user.id)
+        self.refresh()
+
+    def update_course(self):
+        cid = self.selected_id()
+        if not cid: return
+        self.service.update(cid, self.title.get(), self.desc.get())
+        self.refresh()
+
+    def delete_course(self):
+        cid = self.selected_id()
+        if not cid: return
+        self.service.delete(cid)
+        self.refresh()
+# tests/test_services/test_auth.py
+import pytest
+from unittest.mock import MagicMock
+from app.services.auth import AuthService
+
+def test_authenticate_success():
+    db = MagicMock()
+    db.query.return_value = {"id":1,"username":"rida","password_hash":AuthService(db).hash_password("pass"),"role":"ADMIN"}
+    auth = AuthService(db)
+    user = auth.authenticate("rida", "pass")
+    assert user is not None
+    assert user.username == "rida"
+
+def test_authenticate_failure():
+    db = MagicMock()
+    db.query.return_value = None
+    auth = AuthService(db)
+    assert auth.authenticate("x","y") is None
+# tests/test_services/test_course_service.py
+from unittest.mock import MagicMock
+from app.services.course_service import CourseService
+
+def test_create_course_calls_insert():
+    db = MagicMock()
+    svc = CourseService(db)
+    svc.create("Title","Desc",1)
+    db.query.assert_called_with(
+        "INSERT INTO courses(title, description, teacher_id) VALUES(%s,%s,%s)",
+        ("Title","Desc",1)
+    )
+# tests/test_views/test_login.py
+import tkinter as tk
+from unittest.mock import MagicMock
+from app.views.login import LoginView
+
+def test_login_invalid(monkeypatch):
+    root = tk.Tk()
+    db = MagicMock()
+    lv = LoginView(root, db)
+    lv.username.insert(0, "x"); lv.password.insert(0, "y")
+    db.query.return_value = None
+    # Ensure no crash on invalid login
+    lv.login()
 
